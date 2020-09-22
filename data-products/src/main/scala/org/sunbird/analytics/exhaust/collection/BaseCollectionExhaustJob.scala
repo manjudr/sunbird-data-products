@@ -105,10 +105,13 @@ trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExh
     val container = modelParams.getOrElse("storageContainer", "reports").asInstanceOf[String]
     val storageConfig = getStorageConfig(container, "");
     val requests = getRequests(jobId());
+    JobLogger.log("requests" + requests, None, INFO)
     val result = for (request <- requests) yield {
       if (validateRequest(request)) {
+        JobLogger.log("IsValid" + request, None, INFO)
         processRequest(request, custodianOrgId, userCachedDF)
       } else {
+        JobLogger.log("Invalid" + request, None, INFO)
         markRequestAsFailed(request, "Invalid request")
       }
     }
