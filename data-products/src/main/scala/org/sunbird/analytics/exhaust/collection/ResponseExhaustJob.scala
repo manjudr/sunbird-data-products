@@ -34,7 +34,7 @@ object ResponseExhaustJob extends optional.Application with BaseCollectionExhaus
     val assessmentDF = getAssessmentDF(collectionBatch);
     JobLogger.log("assessmentDF" + assessmentDF.count(), None, INFO)
     val contentIds = assessmentDF.select("content_id").dropDuplicates().collect().map(f => f.get(0));
-    JobLogger.log("contentIds" + contentIds.count, None, INFO)
+    JobLogger.log("contentIds" + contentIds.length, None, INFO)
     val contentDF = searchContent(Map("request" -> Map("filters" -> Map("identifier" -> contentIds)))).withColumnRenamed("collectionName", "contentname").select("identifier", "contentname");
     JobLogger.log("contentDF" + contentDF.count, None, INFO)
     val reportDF = assessmentDF.join(contentDF, assessmentDF("content_id") === contentDF("identifier"), "left_outer").join(userEnrolmentDF, Seq("courseid", "batchid", "userid"), "left_outer").drop("identifier").select(filterColumns.head, filterColumns.tail: _*);
