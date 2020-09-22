@@ -9,9 +9,8 @@ import org.apache.spark.sql.SparkSession
 import org.ekstep.analytics.framework.FrameworkContext
 import org.ekstep.analytics.framework.StorageConfig
 import org.ekstep.analytics.framework.conf.AppConf
-import org.ekstep.analytics.framework.util.CommonUtil
+import org.ekstep.analytics.framework.util.{CommonUtil, HadoopFileUtil, JobLogger}
 import org.apache.spark.sql.functions._
-
 import net.lingala.zip4j.ZipFile
 import net.lingala.zip4j.model.ZipParameters
 import net.lingala.zip4j.model.enums.EncryptionMethod
@@ -20,7 +19,8 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.Timestamp
-import org.ekstep.analytics.framework.util.HadoopFileUtil
+
+import org.ekstep.analytics.framework.Level.INFO
 
 case class JobRequest(tag: String, request_id: String, job_id: String, var status: String, request_data: String, requested_by: String, requested_channel: String,
                       dt_job_submitted: Long, var download_urls: Option[List[String]], var dt_file_created: Option[Long], var dt_job_completed: Option[Long], 
@@ -29,6 +29,8 @@ case class JobRequest(tag: String, request_id: String, job_id: String, var statu
 }
 
 trait OnDemandExhaustJob {
+
+  implicit val className: String = "ondemand";
 
   val connProperties: Properties = CommonUtil.getPostgresConnectionProps()
   val db: String = AppConf.getConfig("postgres.db")
@@ -87,6 +89,8 @@ trait OnDemandExhaustJob {
   private def zipAndEncrypt(url: String, storageConfig: StorageConfig, encryptionKey: Option[String])(implicit spark: SparkSession, fc: FrameworkContext): String = {
 
     val path = Paths.get(url);
+    JobLogger.log("accountKey" + storageConfig.accountKey.getOrElse(""), None, INFO)
+    JobLogger.log("secretKey" + storageConfig.secretKey.getOrElse(""), None, INFO)
     val storageService = fc.getStorageService(storageConfig.store, storageConfig.accountKey.getOrElse(""), storageConfig.secretKey.getOrElse(""));
     val localPath = AppConf.getConfig("spark_output_temp_dir") + path.getFileName;
     val filePrefix = storageConfig.store.toLowerCase() match {
@@ -116,6 +120,7 @@ trait OnDemandExhaustJob {
     }).getOrElse({
       new ZipFile(zipPath).addFile(new File(localPath));
     })
+    JobLogger.log("storageConfig.store" + storageConfig.store, None, INFO)
     if(storageConfig.store.equals("local")) {
       fc.getHadoopFileUtil().copy(zipPath, zipObjectKey, spark.sparkContext.hadoopConfiguration)
     } else {
