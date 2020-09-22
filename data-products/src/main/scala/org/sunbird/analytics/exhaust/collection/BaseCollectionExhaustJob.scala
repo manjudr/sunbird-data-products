@@ -41,7 +41,7 @@ case class CollectionInfo(channel: String, identifier: String, name: String, use
 
 trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExhaustJob with Serializable {
 
-  implicit val className: String = getClassName;
+  override implicit val className: String = getClassName;
 
   private val userCacheDBSettings = Map("table" -> "user", "infer.schema" -> "true", "key.column" -> "userid");
   private val userConsentDBSettings = Map("table" -> "user_consent", "keyspace" -> AppConf.getConfig("sunbird.user.keyspace"), "cluster" -> "UserCluster");
