@@ -91,6 +91,7 @@ trait OnDemandExhaustJob {
     val path = Paths.get(url);
     JobLogger.log("accountKey" + storageConfig.accountKey.getOrElse(""), None, INFO)
     JobLogger.log("secretKey" + storageConfig.secretKey.getOrElse(""), None, INFO)
+
     val storageService = fc.getStorageService(storageConfig.store, storageConfig.accountKey.getOrElse(""), storageConfig.secretKey.getOrElse(""));
     val localPath = AppConf.getConfig("spark_output_temp_dir") + path.getFileName;
     val filePrefix = storageConfig.store.toLowerCase() match {
