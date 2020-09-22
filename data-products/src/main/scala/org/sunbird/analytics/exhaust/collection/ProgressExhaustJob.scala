@@ -101,7 +101,7 @@ object ProgressExhaustJob extends optional.Application with BaseCollectionExhaus
     }).toDF()
     val hierarchyDf = hierarchyDataDf.select($"courseid", $"leafNodesCount", $"level1Data", explode_outer($"level1Data").as("exploded_level1Data")).select("courseid", "leafNodesCount", "exploded_level1Data.*")
 
-    JobLogger.log("hierarchyDataDf" collectionAggDF+ hierarchyDataDf.count(), None, INFO)
+    JobLogger.log("hierarchyDataDf"+ hierarchyDataDf.count(), None, INFO)
 
     val dataDf = hierarchyDf.join(userAgg, hierarchyDf.col("courseid") === userAgg.col("activity_id"), "left")
       .withColumn("completionPercentage", when(userAgg.col("completedCount") >= hierarchyDf.col("leafNodesCount"), 100).otherwise(userAgg.col("completedCount") / hierarchyDf.col("leafNodesCount") * 100).cast("int"))
