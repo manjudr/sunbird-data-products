@@ -103,7 +103,7 @@ trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExh
 
     val modelParams = config.modelParams.getOrElse(Map[String, Option[AnyRef]]());
     val container = modelParams.getOrElse("storageContainer", "reports").asInstanceOf[String]
-    val storageConfig = getStorageConfig(container, "");
+    val storageConfig = getStorageConfig(container, AppConf.getConfig("collection.exhaust.store.prefix"));
     val requests = getRequests(jobId());
     JobLogger.log("requests" + requests, None, INFO)
     val result = for (request <- requests) yield {
