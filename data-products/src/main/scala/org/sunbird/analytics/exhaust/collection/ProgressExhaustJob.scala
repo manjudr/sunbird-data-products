@@ -44,13 +44,16 @@ object ProgressExhaustJob extends optional.Application with BaseCollectionExhaus
   override def processBatch(userEnrolmentDF: DataFrame, collectionBatch: CollectionBatch)(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig): DataFrame = {
     JobLogger.log("Process Batch is Invoked", None, INFO)
     val collectionAggDF = getCollectionAgg(collectionBatch).withColumn("batchid", lit(collectionBatch.batchId));
-    JobLogger.log("collectionAggDF" + collectionAggDF.show(false), None, INFO)
+    JobLogger.log("collectionAggDF" + collectionAggDF.count(), None, INFO)
+
     val enrolledUsersToBatch = updateCertificateStatus(userEnrolmentDF).select(filterColumns.head, filterColumns.tail: _*);
     JobLogger.log("enrolledUsersToBatch" + enrolledUsersToBatch.count(), None, INFO)
     val assessmentAggDF = getAssessmentDF(collectionBatch);
     JobLogger.log("assessmentAggDF" + assessmentAggDF.count(), None, INFO)
+
     val progressDF = getProgressDF(enrolledUsersToBatch, collectionAggDF, assessmentAggDF);
     JobLogger.log("progressDF" + progressDF.count(), None, INFO)
+
     organizeDF(progressDF, columnMapping, columnsOrder);
   }
 
@@ -84,30 +87,35 @@ object ProgressExhaustJob extends optional.Application with BaseCollectionExhaus
   }
 
   def getCollectionAgg(batch: CollectionBatch)(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig): DataFrame = {
-
+    JobLogger.log("collectionAggDF invoked", None, INFO)
     import spark.implicits._
     val userAgg = loadData(activityAggDBSettings, cassandraFormat, new StructType()).where(col("context_id") === s"cb:${batch.batchId}").select("user_id", "activity_id", "agg", "context_id")
       .map(row => {
         UserAggData(row.getString(0), row.getString(1), row.get(2).asInstanceOf[Map[String, Int]]("completedCount"), row.getString(3))
       }).toDF()
     val hierarchyData = loadData(contentHierarchyDBSettings, cassandraFormat, new StructType()).where(col("identifier") === s"${batch.collectionId}").select("identifier", "hierarchy")
+    JobLogger.log("hierarchyData invoked" + hierarchyData.count(), None, INFO)
     val hierarchyDataDf = hierarchyData.rdd.map(row => {
       val hierarchy = JSONUtils.deserialize[Map[String, AnyRef]](row.getString(1))
       parseCourseHierarchy(List(hierarchy), 0, CourseData(row.getString(0), "0", List()), depthLevel = 2)
     }).toDF()
     val hierarchyDf = hierarchyDataDf.select($"courseid", $"leafNodesCount", $"level1Data", explode_outer($"level1Data").as("exploded_level1Data")).select("courseid", "leafNodesCount", "exploded_level1Data.*")
 
+    JobLogger.log("hierarchyDataDf" + hierarchyDataDf.count(), None, INFO)
+
     val dataDf = hierarchyDf.join(userAgg, hierarchyDf.col("courseid") === userAgg.col("activity_id"), "left")
       .withColumn("completionPercentage", when(userAgg.col("completedCount") >= hierarchyDf.col("leafNodesCount"), 100).otherwise(userAgg.col("completedCount") / hierarchyDf.col("leafNodesCount") * 100).cast("int"))
       .select(userAgg.col("user_id").as("userid"), userAgg.col("context_id").as("contextid"),
         hierarchyDf.col("courseid"), col("completionPercentage"), hierarchyDf.col("l1identifier"), hierarchyDf.col("l1leafNodesCount"))
+
+    JobLogger.log("dataDf" + dataDf.count(), None, INFO)
 
     val resDf = dataDf.join(userAgg, dataDf.col("l1identifier") === userAgg.col("activity_id") &&
       userAgg.col("context_id") === dataDf.col("contextid") && userAgg.col("user_id") === dataDf.col("userid"), "left")
       .withColumn("batchid", lit(batch.batchId))
       .withColumn("l1completionPercentage", when(userAgg.col("completedCount") >= dataDf.col("l1leafNodesCount"), 100).otherwise(userAgg.col("completedCount") / dataDf.col("l1leafNodesCount") * 100).cast("int"))
       .select("userid", "courseid", "batchid", "completionPercentage", "l1identifier", "l1completionPercentage")
-
+    JobLogger.log("resDf" + dataDf.count(), None, INFO)
     resDf
   }
 
