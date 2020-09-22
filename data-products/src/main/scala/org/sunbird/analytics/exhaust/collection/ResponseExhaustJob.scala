@@ -6,7 +6,9 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.StructType
 import org.ekstep.analytics.framework.FrameworkContext
 import org.ekstep.analytics.framework.JobConfig
+import org.ekstep.analytics.framework.Level.INFO
 import org.ekstep.analytics.framework.conf.AppConf
+import org.ekstep.analytics.framework.util.JobLogger
 
 object ResponseExhaustJob extends optional.Application with BaseCollectionExhaustJob {
   
@@ -30,9 +32,13 @@ object ResponseExhaustJob extends optional.Application with BaseCollectionExhaus
   override def processBatch(userEnrolmentDF: DataFrame, collectionBatch: CollectionBatch)(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig): DataFrame = {
     
     val assessmentDF = getAssessmentDF(collectionBatch);
+    JobLogger.log("assessmentDF" + assessmentDF.count(), None, INFO)
     val contentIds = assessmentDF.select("content_id").dropDuplicates().collect().map(f => f.get(0));
+    JobLogger.log("contentIds" + contentIds.count, None, INFO)
     val contentDF = searchContent(Map("request" -> Map("filters" -> Map("identifier" -> contentIds)))).withColumnRenamed("collectionName", "contentname").select("identifier", "contentname");
+    JobLogger.log("contentDF" + contentDF.count, None, INFO)
     val reportDF = assessmentDF.join(contentDF, assessmentDF("content_id") === contentDF("identifier"), "left_outer").join(userEnrolmentDF, Seq("courseid", "batchid", "userid"), "left_outer").drop("identifier").select(filterColumns.head, filterColumns.tail: _*);
+    JobLogger.log("reportDF" + reportDF.count, None, INFO)
     organizeDF(reportDF, columnMapping, columnsOrder);
   }
   
