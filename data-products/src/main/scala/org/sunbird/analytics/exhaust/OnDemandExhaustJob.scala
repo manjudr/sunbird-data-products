@@ -22,7 +22,7 @@ import java.sql.Timestamp
 
 import org.ekstep.analytics.framework.Level.INFO
 
-case class JobRequest(tag: String, request_id: String, dataset: String, var status: String, dataset_config: String, requested_by: String, requested_channel: String,
+case class JobRequest(tag: String, request_id: String, job_id: String, var status: String, request_data: String, requested_by: String, requested_channel: String,
                       dt_job_submitted: Long, var download_urls: Option[List[String]], var dt_file_created: Option[Long], var dt_job_completed: Option[Long], 
                       var execution_time: Option[Long], var err_message: Option[String], var iteration: Option[Int], encryption_key: Option[String]) {
     def this() = this("", "", "", "", "", "", "", 0, None, None, None, None, None, None, None)
