@@ -22,7 +22,7 @@ import java.sql.Timestamp
 
 import org.ekstep.analytics.framework.Level.INFO
 
-case class JobRequest(tag: String, request_id: String, job_id: String, var status: String, request_data: String, requested_by: String, requested_channel: String,
+case class JobRequest(tag: String, request_id: String, dataset: String, var status: String, dataset_config: String, requested_by: String, requested_channel: String,
                       dt_job_submitted: Long, var download_urls: Option[List[String]], var dt_file_created: Option[Long], var dt_job_completed: Option[Long], 
                       var execution_time: Option[Long], var err_message: Option[String], var iteration: Option[Int], encryption_key: Option[String]) {
     def this() = this("", "", "", "", "", "", "", 0, None, None, None, None, None, None, None)
@@ -43,7 +43,7 @@ trait OnDemandExhaustJob {
 
     val encoder = Encoders.product[JobRequest]
     val reportConfigsDf = spark.read.jdbc(url, requestsTable, connProperties)
-      .where(col("job_id") === jobId).filter(col("status").isin(jobStatus:_*));
+      .where(col("dataset") === jobId).filter(col("status").isin(jobStatus:_*));
     //.where(col("job_id") === jobId && col("iteration") < 3).filter(col("status").isin(jobStatus:_*));
     
     val requests = reportConfigsDf.withColumn("status", lit("PROCESSING")).as[JobRequest](encoder).collect()
@@ -89,8 +89,6 @@ trait OnDemandExhaustJob {
   private def zipAndEncrypt(url: String, storageConfig: StorageConfig, encryptionKey: Option[String])(implicit spark: SparkSession, fc: FrameworkContext): String = {
 
     val path = Paths.get(url);
-    JobLogger.log("accountKey" + storageConfig.accountKey.getOrElse(""), None, INFO)
-    JobLogger.log("secretKey" + storageConfig.secretKey.getOrElse(""), None, INFO)
 
     val storageService = fc.getStorageService(storageConfig.store, storageConfig.accountKey.getOrElse(""), storageConfig.secretKey.getOrElse(""));
     val localPath = AppConf.getConfig("spark_output_temp_dir") + path.getFileName;
@@ -121,7 +119,6 @@ trait OnDemandExhaustJob {
     }).getOrElse({
       new ZipFile(zipPath).addFile(new File(localPath));
     })
-    JobLogger.log("storageConfig.store" + storageConfig.store, None, INFO)
     if(storageConfig.store.equals("local")) {
       fc.getHadoopFileUtil().copy(zipPath, zipObjectKey, spark.sparkContext.hadoopConfiguration)
     } else {
