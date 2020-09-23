@@ -108,10 +108,11 @@ trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExh
     JobLogger.log("requests" + requests, None, INFO)
     val result = for (request <- requests) yield {
       if (validateRequest(request)) {
-        JobLogger.log("IsValid" + request, None, INFO)
+        JobLogger.log("Valid " + request, None, INFO)
+
         processRequest(request, custodianOrgId, userCachedDF)
       } else {
-        JobLogger.log("Invalid" + request, None, INFO)
+        JobLogger.log("InValid  " + request, None, INFO)
         markRequestAsFailed(request, "Invalid request")
       }
     }
@@ -119,8 +120,8 @@ trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExh
   }
 
   def processRequest(request: JobRequest, custodianOrgId: String, userCachedDF: DataFrame)(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig): JobRequest = {
-    val collectionConfig = JSONUtils.deserialize[CollectionConfig](request.request_data);
-    JobLogger.log("collectionConfig" + request.request_data, None, INFO)
+    val collectionConfig = JSONUtils.deserialize[CollectionConfig](request.dataset_config);
+    JobLogger.log("collectionConfig" + request.dataset_config, None, INFO)
     val collectionBatches = getCollectionBatches(collectionConfig.batchId, None, collectionConfig.searchFilter, custodianOrgId, request.requested_channel)
     JobLogger.log("collectionBatches" + collectionBatches, None, INFO)
     val result = CommonUtil.time(processBatches(userCachedDF, collectionBatches));
@@ -139,7 +140,7 @@ trait BaseCollectionExhaustJob extends BaseReportsJob with IJob with OnDemandExh
   }
 
   def validateRequest(request: JobRequest): Boolean = {
-    val collectionConfig = JSONUtils.deserialize[CollectionConfig](request.request_data);
+    val collectionConfig = JSONUtils.deserialize[CollectionConfig](request.dataset_config);
     if (collectionConfig.batchId.isEmpty && collectionConfig.searchFilter.isEmpty) false else true
     // TODO: Check if the requestedBy user role has permission to request for the job
   }
