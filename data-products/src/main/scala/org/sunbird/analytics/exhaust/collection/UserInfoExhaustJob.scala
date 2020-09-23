@@ -5,6 +5,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.ekstep.analytics.framework.FrameworkContext
 import org.ekstep.analytics.framework.JobConfig
+import org.ekstep.analytics.framework.Level.INFO
+import org.ekstep.analytics.framework.util.JobLogger
 import org.sunbird.analytics.exhaust.JobRequest
 
 object UserInfoExhaustJob extends optional.Application with BaseCollectionExhaustJob with Serializable {
@@ -37,7 +39,7 @@ object UserInfoExhaustJob extends optional.Application with BaseCollectionExhaus
     "persona" -> "Persona", "orgname" -> "Org Name", "externalid" -> "External ID", "schooludisecode" -> "School Id", "schoolname" -> "School Name", "block" -> "Block Name", "board" -> "Declared Board", "userchannel" -> "Declared Org", "email" -> "Email ID", "phone" -> "Mobile Number", "consentflag" -> "Consent Provided", "consentprovideddate" -> "Consent Provided Date")
 
   override def processBatch(userEnrolmentDF: DataFrame, collectionBatch: CollectionBatch)(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig): DataFrame = {
-
+    JobLogger.log("collectionBatch.userConsent" + collectionBatch.userConsent.getOrElse("No"), None, INFO)
     collectionBatch.userConsent.getOrElse("No").toLowerCase() match {
       case "yes" =>
         val userEnrolments = userEnrolmentDF
@@ -63,6 +65,7 @@ object UserInfoExhaustJob extends optional.Application with BaseCollectionExhaus
       // Org level consent - will be updated in 3.4 to read from user_consent table
       resultDF.withColumn("orgconsentflag", when(col("rootorgid") === collectionBatch.requestedOrgId, "true").otherwise("false"))
     }
+    JobLogger.log("consentDF" + consentDF.count(), None, INFO)
 
     val consentAppliedDF = consentFields.foldLeft(consentDF)((df, column) => df.withColumn(column._1, when(col("consentflag") === "true", col(column._1)).otherwise(col(column._2))));
     orgDerivedFields.foldLeft(consentAppliedDF)((df, field) => df.withColumn(field, when(col("consentflag") === "true", col(field)).when(col("orgconsentflag") === "true", col(field)).otherwise("")));
