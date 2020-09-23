@@ -53,8 +53,6 @@ trait BaseReportsJob {
   def setReportsStorageConfiguration(sc: SparkContext) {
     val reportsStorageAccountKey = AppConf.getConfig("reports_storage_key")
     val reportsStorageAccountSecret = AppConf.getConfig("reports_storage_secret")
-    println("====reports_storage_key=====" + reportsStorageAccountKey)
-    println("====reportsStorageAccountSecret=====" + reportsStorageAccountSecret)
     if (reportsStorageAccountKey != null && !reportsStorageAccountSecret.isEmpty) {
       sc.hadoopConfiguration.set("fs.azure", "org.apache.hadoop.fs.azure.NativeAzureFileSystem")
       sc.hadoopConfiguration.set("fs.azure.account.key." + reportsStorageAccountKey + ".blob.core.windows.net", reportsStorageAccountSecret)
@@ -65,8 +63,6 @@ trait BaseReportsJob {
   def getStorageConfig(container: String, key: String): org.ekstep.analytics.framework.StorageConfig = {
     val reportsStorageAccountKey = AppConf.getConfig("reports_storage_key")
     val reportsStorageAccountSecret = AppConf.getConfig("reports_storage_secret")
-    println("2====reports_storage_key=====" + reportsStorageAccountKey)
-    println("2====reportsStorageAccountSecret=====" + reportsStorageAccountSecret)
     val provider = AppConf.getConfig("cloud_storage_type")
     if (reportsStorageAccountKey != null && !reportsStorageAccountSecret.isEmpty) {
       org.ekstep.analytics.framework.StorageConfig(provider, container, key, Option("reports_storage_key"), Option("reports_storage_secret"));
