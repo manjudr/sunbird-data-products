@@ -48,13 +48,20 @@ object ProgressExhaustJob extends optional.Application with BaseCollectionExhaus
   }
 
   def getProgressDF(userEnrolmentDF: DataFrame, collectionAggDF: DataFrame, assessmentAggDF: DataFrame): DataFrame = {
+    println("userEnrolmentDF" + userEnrolmentDF.show(false))
+    println("collectionAggDF" + collectionAggDF.show(false))
+    println("assessmentAggDF" + assessmentAggDF.show(false))
 
     val collectionAggPivotDF = collectionAggDF.groupBy("courseid", "batchid", "userid", "completionPercentage").pivot(concat(col("l1identifier"), lit(" - Progress"))).agg(first(col("l1completionPercentage")));
+    println("collectionAggPivotDF" + collectionAggPivotDF.show(false))
     val assessmentAggPivotDF = assessmentAggDF.groupBy("courseid", "batchid", "userid", "total_sum_score")
       .pivot(concat(col("content_id"), lit(" - Score"))).agg(concat(ceil((split(first("grand_total"), "\\/")
         .getItem(0) * 100) / (split(first("grand_total"), "\\/")
           .getItem(1))), lit("%")))
+    println("assessmentAggPivotDF" + assessmentAggPivotDF.show(false))
     val progressDF = collectionAggPivotDF.join(assessmentAggPivotDF, Seq("courseid", "batchid", "userid"), "left_outer")
+    println("progressDF" + progressDF.show(false))
+
     userEnrolmentDF.join(progressDF, Seq("courseid", "batchid", "userid"), "inner")
       .withColumn("completedon", when(col("completedon").isNotNull, date_format(col("completedon"), "dd/MM/yyyy")).when(col("completionPercentage") === 100, date_format(current_date(), "dd/MM/yyyy")).otherwise(""))
       .withColumn("enrolleddate", date_format(to_date(col("enrolleddate")), "dd/MM/yyyy"))
