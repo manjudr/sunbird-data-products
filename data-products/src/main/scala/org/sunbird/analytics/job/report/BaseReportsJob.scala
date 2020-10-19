@@ -89,4 +89,13 @@ trait BaseReportsJob {
 
   }
 
+  def fetchData(spark: SparkSession, settings: Map[String, String], url: String, schema: StructType): DataFrame = {
+    if (schema.nonEmpty) {
+      spark.read.schema(schema).format(url).options(settings).load()
+    }
+    else {
+      spark.read.format(url).options(settings).load()
+    }
+  }
+
 }
