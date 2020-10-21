@@ -2,12 +2,13 @@ package org.sunbird.analytics.job.report
 
 import java.util.concurrent.atomic.AtomicInteger
 
+import breeze.linalg.sum
 import com.datastax.spark.connector.cql.CassandraConnectorConf
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.cassandra.CassandraSparkSessionFunctions
-import org.apache.spark.sql.functions.{col, concat_ws, lower}
-import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{DataFrame, Encoders, SQLContext, SparkSession}
+import org.apache.spark.sql.functions.{col, concat_ws, current_date, current_timestamp, date_format, datediff, from_utc_timestamp, lit, lower, size, when}
+import org.apache.spark.sql.types.{DataTypes, StructType}
+import org.apache.spark.sql.{DataFrame, Encoders, Row, SQLContext, SparkSession}
 import org.apache.spark.storage.StorageLevel
 import org.ekstep.analytics.framework.Level.INFO
 import org.ekstep.analytics.framework.conf.AppConf
@@ -28,6 +29,7 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
   val cassandraUrl = "org.apache.spark.sql.cassandra"
   private val userCacheDBSettings = Map("table" -> "user", "infer.schema" -> "true", "key.column" -> "userid")
   private val userEnrolmentDBSettings = Map("table" -> "user_enrolments", "keyspace" -> AppConf.getConfig("sunbird.courses.keyspace"), "cluster" -> "LMSCluster")
+  private val organisationDBSettings = Map("table" -> "organisation", "keyspace" -> "sunbird", "cluster" -> "LMSCluster")
   implicit val className: String = "org.sunbird.analytics.job.report.CollectionSummaryJob"
   val jobName = "CollectionSummaryJob"
 
@@ -69,7 +71,7 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
   def execute(batchList: List[String])(implicit spark: SparkSession, fc: FrameworkContext, config: JobConfig) = {
 
     val time = CommonUtil.time({
-      prepareReport(spark, fetchData, config, batchList)
+      prepareReport(spark, fetchData, batchList)
     });
   }
 
@@ -88,18 +90,24 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
       .withColumn("username", concat_ws(" ", col("firstname"), col("lastname"))).persist(StorageLevel.MEMORY_ONLY)
   }
 
-  def getUserEnrollment(courseId: String, batchId: String, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame)(implicit spark: SparkSession): DataFrame = {
+  def getUserEnrollment(spark: SparkSession, courseId: String, batchId: String, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame): DataFrame = {
     fetchData(spark, userEnrolmentDBSettings, cassandraUrl, new StructType())
       .where(col("courseid") === courseId && col("batchid") === batchId && lower(col("active")).equalTo("true") && col("enrolleddate").isNotNull)
       .select(col("batchid"), col("userid"), col("courseid"), col("active")
-        , col("completionpercentage"), col("enrolleddate"), col("completedon"))
+        , col("completionpercentage"), col("enrolleddate"), col("completedon"), col("status"), col("certificates"))
   }
 
-  def prepareReport(spark: SparkSession, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame, config: JobConfig, batchList: List[String])(implicit fc: FrameworkContext): List[CollectionBatchResponse] = {
+  def getOrganisationDetails(spark: SparkSession, channel: String, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame): DataFrame = {
+    fetchData(spark, organisationDBSettings, cassandraUrl, new StructType()).select("channel", "orgname", "id")
+      .where(col("channel") === channel)
+  }
+
+
+  def prepareReport(spark: SparkSession, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame, batchList: List[String])(implicit fc: FrameworkContext, config: JobConfig): List[CollectionBatchResponse] = {
     implicit val sparkSession: SparkSession = spark
     implicit val sqlContext: SQLContext = spark.sqlContext
     val res = CommonUtil.time({
-      val userDF = getUserData(spark, fetchData = fetchData)
+      val userDF = getUserData(spark, fetchData = fetchData).select("userid", "orgname", "userchannel")
       (userDF.count(), userDF)
     })
     JobLogger.log("Time to fetch user details", Some(Map("timeTaken" -> res._1, "count" -> res._2._1)), INFO)
@@ -109,6 +117,7 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
     val activeBatches: List[CollectionBatch] = CourseUtils.getActiveBatches(fetchData, batchList, AppConf.getConfig("sunbird.courses.keyspace"))
       .as[CollectionBatch](encoder).collect().toList
     val activeBatchesCount = new AtomicInteger(activeBatches.length)
+    println("activeBatches" + activeBatches)
     val result: List[CollectionBatchResponse] = for (collectionBatch <- activeBatches) yield {
       val response = processBatch(userCachedDF, collectionBatch, fetchData)
       JobLogger.log("Batch is processed", Some(Map("batchId" -> response.batchId, "execTime" -> response.execTime, "filePath" -> response.file, "remainingBatch" -> activeBatchesCount.getAndDecrement())), INFO)
@@ -117,11 +126,45 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
     result
   }
 
-  def processBatch(userCacheDF: DataFrame, collectionBatch: CollectionBatch, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame)(implicit spark: SparkSession): CollectionBatchResponse = {
-    val userEnrolment = getUserEnrollment(collectionBatch.courseId, collectionBatch.batchId, fetchData).join(userCacheDF, Seq("userid"), "inner")
+  def processBatch(userCacheDF: DataFrame, collectionBatch: CollectionBatch, fetchData: (SparkSession, Map[String, String], String, StructType) => DataFrame)
+                  (implicit spark: SparkSession, config: JobConfig): CollectionBatchResponse = {
 
+    implicit val sparkSession: SparkSession = spark
+    implicit val sqlContext: SQLContext = spark.sqlContext
+    println("collectionDetails =" + collectionBatch)
+    val filteredContents = CourseUtils.filterContents(spark, JSONUtils.serialize(Map("request" -> Map("filters" -> Map("identifier" -> collectionBatch.courseId, "status" -> Array("Live", "Unlisted", "Retired")), "fields" -> Array("channel", "identifier", "name")))))
+    val channel = filteredContents.map(res => res.channel).head
+    val collectionName = filteredContents.map(res => res.name).head
+    val organisationDF = getOrganisationDetails(spark, channel, fetchData).select("orgname", "channel").collect() // Filter by channel and returns channel, orgname, id fields
+    val userEnrolment = getUserEnrollment(spark, collectionBatch.courseId, collectionBatch.batchId, fetchData).join(userCacheDF, Seq("userid"), "inner")
+    val publisherName = organisationDF.headOption.getOrElse(Row()).getString(0)
+    val completedUsers = userEnrolment.where(col("status") === 2)
+    val avgElapsedTime = getAvgElapsedTime(completedUsers)
+    val userInfo = userEnrolment.withColumn("publishedBy", lit(publisherName))
+      .withColumn("collectionName", lit(collectionName))
+      .withColumn("collectionId", lit(collectionBatch.courseId))
+      .withColumn("batchStartDate", lit(collectionBatch.startDate))
+      .withColumn("batchStartDate", lit(collectionBatch.endDate))
+      .withColumn("enrolmentCount", lit(userEnrolment.select("userid").distinct().count()))
+      .withColumn("completionCount", lit(completedUsers.select("userid").distinct().count()))
+      .withColumn("collectionName", lit(filteredContents.map(res => res.name).head))
+      .withColumn("generatedOn", date_format(from_utc_timestamp(current_timestamp.cast(DataTypes.TimestampType), "Asia/Kolkata"), "yyyy-MM-dd'T'HH:mm:ss'Z'"))
+      .withColumn("isCertificateIssued", when(col("certificates").isNotNull && size(col("certificates").cast("array<map<string, string>>")) > 0, "Y").otherwise("N"))
+      .withColumn("completionCountBySameOrg", lit(completedUsers.where(col("userchannel") === channel).count()))
+      .withColumn("enrolCountBySameOrg", lit(userEnrolment.where(col("userchannel") === channel).select("userid").distinct().count()))
+      .withColumn("avgElapsedTime", lit(avgElapsedTime)
+      )
+    println("userInfo" + userInfo.show(false))
     null
   }
 
+  def getAvgElapsedTime(usersEnrolmentDF: DataFrame): Long = {
+    import org.apache.spark.sql.functions._
+    val updatedUser = usersEnrolmentDF
+      .withColumn("enrolDate", date_format(from_utc_timestamp(col("enrolleddate").cast(DataTypes.TimestampType), "Asia/Kolkata"), "yyyy-MM-dd'T'HH:mm:ss'Z'"))
+      .withColumn("completedDate", date_format(from_utc_timestamp(col("completedon").cast(DataTypes.TimestampType), "Asia/Kolkata"), "yyyy-MM-dd'T'HH:mm:ss'Z'"))
+      .withColumn("minsDiff", (col("enrolDate").cast("long") - col("completedDate").cast("long")) / 60)
+    updatedUser.agg(sum("minsDiff").cast("long")).first.getLong(0) / updatedUser.select("userid").distinct().count()
+  }
 
 }

@@ -140,7 +140,8 @@ object CourseMetricsJob extends optional.Application with IJob with ReportGenera
 
     for (batch <- activeBatches) {
       val result = CommonUtil.time({
-        val reportDF = recordTime(getReportDF(batch, userData._2, loadData), s"Time taken to generate DF for batch ${batch.batchid} - ")
+        val reportDF = recordTime(
+          getReportDF(batch, userData._2, loadData), s"Time taken to generate DF for batch ${batch.batchid} - ")
         val totalRecords = reportDF.count()
         recordTime(saveReportToBlobStore(batch, reportDF, storageConfig, totalRecords), s"Time taken to save report in blobstore for batch ${batch.batchid} - ")
         recordTime(saveReportToES(batch, reportDF, newIndex,totalRecords), s"Time taken to save report in ES for batch ${batch.batchid} - ")

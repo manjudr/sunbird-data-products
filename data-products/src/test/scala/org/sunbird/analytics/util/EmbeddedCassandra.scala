@@ -21,15 +21,15 @@ object EmbeddedCassandra {
     conf.set("spark.cassandra.connection.port", AppConf.getConfig("cassandra.service.embedded.connection.port"))
     conf;
   }
-  
+
   def setup() {
     dataLoader.load(new FileCQLDataSet(AppConf.getConfig("cassandra.cql_path"), true, true));
   }
-  
+
   def loadData(cqlFile: String) {
     dataLoader.load(new FileCQLDataSet(cqlFile, false, false))
   }
-  
+
   def close() {
     EmbeddedCassandraServerHelper.cleanEmbeddedCassandra();
   }
