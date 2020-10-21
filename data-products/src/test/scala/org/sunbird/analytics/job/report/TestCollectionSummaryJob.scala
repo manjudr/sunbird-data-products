@@ -1,25 +1,33 @@
 package org.sunbird.analytics.job.report
 
-import org.apache.spark.sql.functions.udf
+import org.apache.spark.sql.functions.{udf, _}
 import org.apache.spark.sql.types.{ArrayType, MapType, StringType, StructType}
 import org.apache.spark.sql.{DataFrame, Encoders, SparkSession}
 import org.ekstep.analytics.framework.util.JSONUtils
 import org.ekstep.analytics.framework.{FrameworkContext, JobConfig, StorageConfig}
+import org.mockserver.integration.ClientAndServer
+import org.mockserver.integration.ClientAndServer.startClientAndServer
 import org.scalamock.scalatest.MockFactory
 import org.sunbird.analytics.util.UserData
 
-import java.io.File
-import java.time.{ZoneOffset, ZonedDateTime}
-
-import cats.syntax.either._
-import ing.wbaa.druid._
-import ing.wbaa.druid.client.DruidClient
-import io.circe._
-import io.circe.parser._
-import org.apache.spark.sql.functions._
-import scala.collection.JavaConverters._
-
 import scala.collection.mutable
+
+
+/** *
+ * *************************************** START OF TEST INPUT ****************************************
+ * Report1 = (batch = (0130320389509939204), course = (do_112636984058314752121), enrolledUsers(c7ef3848-bbdb-4219-8344-817d5b8103fa, user021), channel (b00bc992ef25f1a9a8d63291e20efc8d)
+ * Report2 = (batch = (0130293763489873929), course = (do_1130293726460805121168), enrolledUsers(f3dd58a4-a56f-4c1d-95cf-3231927a28e9, user026), channel (013016492159606784174))
+ * Report3 = (batch = (01303150537737011211), course = (do_1130314965721088001129), enrolledUsers(user026, user025), channel (b00bc992ef25f1a9a8d63291e20efc8d))
+ * Report4 = (batch = (0130271096968396800), course = (do_1130264512015646721166), enrolledUsers(user027), channel (013016492159606784174))
+ *
+ * channel_org_map = (channel = b00bc992ef25f1a9a8d63291e20efc8d, orgId = 0126391644091351040 , orgName = "MPPS BAYYARAM"), (channel = 013016492159606784174, orgId = 0125302909498654720 , orgName = MPPS SIMHACHALNAGAR)
+ * user_org_map = (
+ * (orgName = "MPPS BAYYARAM", userId = (c7ef3848-bbdb-4219-8344-817d5b8103fa, user021, f3dd58a4-a56f-4c1d-95cf-3231927a28e9)),
+ * orgName = "MPPS SIMHACHALNAGAR", userId = (user026, user025, user027)),
+ * )
+ * *************************************** END OF TEST INPUT ******************************************
+ */
+
 
 class TestCollectionSummaryJob extends BaseReportSpec with MockFactory {
 
@@ -38,7 +46,6 @@ class TestCollectionSummaryJob extends BaseReportSpec with MockFactory {
   override def beforeAll(): Unit = {
     super.beforeAll()
     spark = getSparkSession();
-
     courseBatchDF = spark
       .read
       .format("com.databricks.spark.csv")
@@ -74,7 +81,7 @@ class TestCollectionSummaryJob extends BaseReportSpec with MockFactory {
   it should "generate the report for all the batches" in {
 
     (reporterMock.fetchData _)
-      .expects(spark, Map("table" -> "course_batch", "keyspace" -> sunbirdCoursesKeyspace), "org.apache.spark.sql.cassandra", new StructType())
+      .expects(spark, Map("table" -> "course_batch", "keyspace" -> sunbirdCoursesKeyspace, "cluster" -> "LMSCluster"), "org.apache.spark.sql.cassandra", new StructType())
       .returning(courseBatchDF)
 
     (reporterMock.fetchData _)
@@ -100,6 +107,5 @@ class TestCollectionSummaryJob extends BaseReportSpec with MockFactory {
     val storageConfig = StorageConfig("local", "", "/tmp/course-metrics")
     CollectionSummaryJob.prepareReport(spark, reporterMock.fetchData, List())
   }
-
 
 }
