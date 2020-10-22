@@ -5,8 +5,6 @@ import org.apache.spark.sql.types.{ArrayType, MapType, StringType, StructType}
 import org.apache.spark.sql.{DataFrame, Encoders, SparkSession}
 import org.ekstep.analytics.framework.util.JSONUtils
 import org.ekstep.analytics.framework.{FrameworkContext, JobConfig, StorageConfig}
-import org.mockserver.integration.ClientAndServer
-import org.mockserver.integration.ClientAndServer.startClientAndServer
 import org.scalamock.scalatest.MockFactory
 import org.sunbird.analytics.util.UserData
 
@@ -50,24 +48,24 @@ class TestCollectionSummaryJob extends BaseReportSpec with MockFactory {
       .read
       .format("com.databricks.spark.csv")
       .option("header", "true")
-      .load("src/test/resources/collection-summary/course_batch_data.csv")
+      .load("src/test/resources/collection-summary/modified/course_batch_data.csv")
       .cache()
 
     userEnrolments = spark
       .read
       .format("com.databricks.spark.csv")
       .option("header", "true")
-      .load("src/test/resources/collection-summary/user_courses_data.csv")
+      .load("src/test/resources/collection-summary/modified/user_courses_data.csv")
       .cache()
 
     organisationDF = spark
       .read
       .format("com.databricks.spark.csv")
       .option("header", "true")
-      .load("src/test/resources/collection-summary/orgTable.csv")
+      .load("src/test/resources/collection-summary/modified/orgTable.csv")
       .cache()
 
-    userDF = spark.read.json("src/test/resources/collection-summary/user_data.json")
+    userDF = spark.read.json("src/test/resources/collection-summary/modified/user_data.json")
       .cache()
 
   }

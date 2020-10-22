@@ -6,8 +6,8 @@ import com.datastax.spark.connector.cql.CassandraConnectorConf
 import org.apache.spark.SparkContext
 import org.apache.spark.sql._
 import org.apache.spark.sql.cassandra.CassandraSparkSessionFunctions
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{DataTypes, LongType, StructType}
+import org.apache.spark.sql.functions.{when, _}
+import org.apache.spark.sql.types.{LongType, StructType}
 import org.apache.spark.storage.StorageLevel
 import org.ekstep.analytics.framework.Level.INFO
 import org.ekstep.analytics.framework.conf.AppConf
@@ -40,14 +40,14 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
   val jobName = "CollectionSummaryJob"
 
   private val columnsOrder = List("Published by", "Collection id", "Collection name", "Batch start date", "Batch end date", "Total Enrolments", "Total Completion", "Total Enrolment from same org", "Total Completion from same org",
-    "Is certified course", "Total Certificate issues", "Average elapsed time to complete the course", "Generated on");
+    "Is certified course", "Total Certificate issues", "Average elapsed time to complete the course");
 
   private val columnMapping = Map("publishedBy" -> "Published by", "collectionId" -> "Collection id", "collectionName" -> "Collection name", "batchStartDate" -> "Batch start date",
     "batchEndDate" -> "Batch end date", "enrolmentCount" -> "Total Enrolments", "completionCount" -> "Total Completion",
     "enrolCountBySameOrg" -> "Total Enrolment from same org", "completionCountBySameOrg" -> "Total Completion from same org",
     "isCertified" -> "Is certified course",
     "certificateIssuesCount" -> "Total Certificate issues",
-    "avgElapsedTime" -> "Average elapsed time to complete the course", "generatedOn" -> "Generated on")
+    "avgElapsedTime" -> "Average elapsed time to complete the course")
 
 
   override def main(config: String)(implicit sc: Option[SparkContext] = None, fc: Option[FrameworkContext] = None) {
@@ -140,30 +140,28 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
                   (implicit spark: SparkSession, config: JobConfig): CollectionBatchResponses = {
     implicit val sparkSession: SparkSession = spark
     implicit val sqlContext: SQLContext = spark.sqlContext
+    import spark.implicits._
     val res = CommonUtil.time({
-      val filteredContents:List[CourseBatchInfo] = CourseUtils.filterContents(spark, JSONUtils.serialize(Map("request" -> Map("filters" -> Map("identifier" -> collectionBatch.courseId, "status" -> Array("Live", "Unlisted", "Retired")), "fields" -> Array("channel", "identifier", "name")))))
-      println("filteredContents" + filteredContents)
+      val filteredContents: List[CourseBatchInfo] = CourseUtils.filterContents(spark, JSONUtils.serialize(Map("request" -> Map("filters" -> Map("identifier" -> collectionBatch.courseId, "status" -> Array("Live", "Unlisted", "Retired")), "fields" -> Array("channel", "identifier", "name")))))
       val channel = filteredContents.map(res => res.channel).headOption.getOrElse("")
       val collectionName = filteredContents.map(res => res.name).headOption.getOrElse("")
       val organisationDF = getOrganisationDetails(spark, channel, fetchData).select("orgname", "channel").collect() // Filter by channel and returns channel, orgname, id fields
       val userEnrolment = getUserEnrollment(spark, collectionBatch.courseId, collectionBatch.batchId, fetchData).join(userCacheDF, Seq("userid"), "inner")
+        .withColumn("isCertificatedIssued", when(col("certificates").isNotNull && size(col("certificates").cast("array<map<string, string>>")) > 0, "Y").otherwise("N"))
       val publisherName = organisationDF.headOption.getOrElse(Row()).getString(0)
       val completedUsers = userEnrolment.where(col("status") === 2)
       val avgElapsedTime = getAvgElapsedTime(completedUsers)
-      val userInfo = userEnrolment.withColumn("publishedBy", lit(publisherName))
-        .withColumn("collectionName", lit(collectionName))
-        .withColumn("collectionId", lit(collectionBatch.courseId))
-        .withColumn("batchStartDate", lit(collectionBatch.startDate))
-        .withColumn("batchEndDate", lit(collectionBatch.endDate))
-        .withColumn("enrolmentCount", lit(userEnrolment.select("userid").distinct().count()))
-        .withColumn("completionCount", lit(completedUsers.select("userid").distinct().count()))
-        .withColumn("generatedOn", date_format(from_utc_timestamp(current_timestamp.cast(DataTypes.TimestampType), "Asia/Kolkata"), "yyyy-MM-dd'T'HH:mm:ss'Z'"))
-        .withColumn("isCertified", when(col("certificates").isNotNull && size(col("certificates").cast("array<map<string, string>>")) > 0, "Y").otherwise("N"))
-        .withColumn("completionCountBySameOrg", lit(completedUsers.where(col("userchannel") === channel).count()))
-        .withColumn("enrolCountBySameOrg", lit(userEnrolment.where(col("userchannel") === channel).select("userid").distinct().count()))
-        .withColumn("avgElapsedTime", lit(avgElapsedTime))
-        .withColumn("certificateIssuesCount", lit(10)) // TODO: Compute this logic
-        .drop("userid", "batchid", "active", "courseid", "completionpercentage", "enrolleddate", "completedon", "status", "certificates", "orgname", "userchannel")
+      val totalCertificatesIssues: Long = userEnrolment.where(col("isCertificatedIssued") === "Y").count()
+      val userInfo = Seq(
+        (publisherName, collectionName, collectionBatch.batchId, collectionBatch.startDate, collectionBatch.endDate,
+          userEnrolment.select("userid").distinct().count(), completedUsers.select("userid").distinct().count(),
+          completedUsers.where(completedUsers.col("userchannel") === channel).count(), userEnrolment.where(userEnrolment.col("userchannel") === channel).select("userid").distinct().count(),
+          avgElapsedTime, totalCertificatesIssues, if (totalCertificatesIssues > 0) "Y" else "N"
+        )
+      ).toDF("publishedBy", "collectionName", "collectionId", "batchStartDate", "batchEndDate",
+        "enrolmentCount", "completionCount", "completionCountBySameOrg", "enrolCountBySameOrg",
+        "avgElapsedTime", "certificateIssuesCount", "isCertified"
+      )
       saveToBlob(userInfo, collectionBatch.batchId)
     })
     CollectionBatchResponses(batchId = collectionBatch.batchId, execTime = res._1, status = "SUCCESS")
@@ -175,8 +173,8 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
       .withColumn("enrolDate", to_timestamp(col("enrolleddate"), fmt = "yyyy-MM-dd HH:mm:ss"))
       .withColumn("completedDate", to_timestamp(col("completedon"), fmt = "yyyy-MM-dd HH:mm:ss"))
       .withColumn("diffInMinutes", round(col("completedDate").cast(LongType) - col("enrolDate").cast(LongType)) / 60) // Converting to mins
-    println("updatedUser" + updatedUser.show(false))
-    updatedUser.agg(sum("diffInMinutes").cast("long")).first.getLong(0) / updatedUser.select("userid").distinct().count()
+    val diffInMinutes = updatedUser.agg(sum("diffInMinutes").cast("long")).first
+    if (diffInMinutes.isNullAt(0)) 0L else diffInMinutes.getLong(0) / updatedUser.select("userid").distinct().count()
   }
 
   def saveToBlob(reportData: DataFrame, batchId: String): Unit = {
@@ -188,8 +186,9 @@ object CollectionSummaryJob extends optional.Application with IJob with BaseRepo
     val colNames = for (e <- fields) yield columnMapping.getOrElse(e, e)
     val dynamicColumns = fields.toList.filter(e => !columnMapping.keySet.contains(e))
     val columnWithOrder = (columnsOrder ::: dynamicColumns).distinct
-    reportData.toDF(colNames: _*).select(columnWithOrder.head, columnWithOrder.tail: _*)
-      .saveToBlobStore(storageConfig, "csv", reportPath + "report-" + batchId, Option(Map("header" -> "true")), None)
+    val fin = reportData.toDF(colNames: _*).select(columnWithOrder.head, columnWithOrder.tail: _*)
+    println("Final report" + fin.show(false))
+    fin.saveToBlobStore(storageConfig, "csv", reportPath + "report-" + batchId, Option(Map("header" -> "true")), None)
   }
 
   /**
